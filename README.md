@@ -6,4 +6,19 @@ Made to replace the hex edited TotalA.exe in the Total Annihilation community pa
 Final OTA/Mod package could look like this (No TotalA.exe!):
 ![image](https://github.com/FunkyFr3sh/Total-Annihilation-Patch-Loader/assets/8355237/e8f7b5c6-f488-413b-944a-acbff79b69a6)
 
+## Player-color focus-halo fix
+
+This workspace variant suppresses Total Annihilation's generic six-pixel focus halo
+for the 20x20 `Color%d` GAF controls used in Skirmish/Multiplayer setup. The original
+focus renderer uses hardcoded palette indices `31, 28, 24, 19, 13, 6`; its expanding
+rectangles overwrite adjacent rows and create the apparent highlight/remapping defect.
+
+All other GUI controls retain their normal focus rendering. The hook validates the
+original call sites and renderer signature before installing. `TotalA.exe` is not
+changed on disk.
+
+The two call sites are independently controlled by `PlayerColorFocusPrimary` and
+`PlayerColorFocusLinked` in the embedded `[Settings]` section of `res/patches.ini`.
+Set both to `No` and rebuild to disable the fix completely.
+
 

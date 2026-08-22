@@ -3,6 +3,7 @@
 #include <ddraw.h>
 #include "patch.h"
 #include "patches.h"
+#include "color_focus_fix.h"
 
 #define TA_DDRAW_DLL_STR     ((char*)0x004FF618)
 #define TA_MP_VERSION_MAJOR *((BYTE*)0x0049E9C0)
@@ -52,6 +53,24 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
                 g_patches_debug_str);
             
             MessageBoxA(NULL, msg, "Total Annihilation Community Patch", MB_OK);
+
+            exit(1);
+            return FALSE;
+        }
+
+        const PATCH_RUNTIME_OPTIONS *runtime_options = patches_get_runtime_options();
+        char color_focus_error[256] = { 0 };
+        if (!color_focus_fix_install(
+                runtime_options->player_color_focus_primary,
+                runtime_options->player_color_focus_linked,
+                color_focus_error,
+                sizeof(color_focus_error)))
+        {
+            MessageBoxA(
+                NULL,
+                color_focus_error,
+                "Total Annihilation Player-Color Focus Fix",
+                MB_OK | MB_ICONERROR);
 
             exit(1);
             return FALSE;
