@@ -8,6 +8,33 @@
 
 char g_patches_debug_str[512];
 static PATCH_OFFSET g_patches_offsets[4096];
+static PATCH_RUNTIME_OPTIONS g_runtime_options = {
+    TRUE, /* PlayerColorFocusPrimary */
+    TRUE  /* PlayerColorFocusLinked */
+};
+
+static int patches_read_yes_no(
+    const char *section,
+    const char *name,
+    const char *value,
+    BOOL *result)
+{
+    if (_strcmpi(value, "Yes") == 0)
+    {
+        *result = TRUE;
+        return 1;
+    }
+
+    if (_strcmpi(value, "No") == 0)
+    {
+        *result = FALSE;
+        return 1;
+    }
+
+    LOG_ERROR("Invalid value - '%s'\n[%s]%s=%s\nValid values = 'Yes' and 'No'",
+        value, section, name, value);
+    return 0;
+}
 
 static int patches_setbytes(DWORD offset, char* buf, size_t size)
 {
@@ -302,6 +329,22 @@ static int patches_apply_presets(void* user, const char* section, const char* na
             return 0;
         }
     }
+    else if (_strcmpi(name, "PlayerColorFocusPrimary") == 0)
+    {
+        return patches_read_yes_no(
+            section,
+            name,
+            value,
+            &g_runtime_options.player_color_focus_primary);
+    }
+    else if (_strcmpi(name, "PlayerColorFocusLinked") == 0)
+    {
+        return patches_read_yes_no(
+            section,
+            name,
+            value,
+            &g_runtime_options.player_color_focus_linked);
+    }
     else
     {
         LOG_ERROR("Unknown setting - '%s'\n[%s]%s=%s", name, section, name, value);
@@ -445,4 +488,9 @@ int patches_apply(HMODULE mod)
     free(ini);
 
     return result;
+}
+
+const PATCH_RUNTIME_OPTIONS *patches_get_runtime_options(void)
+{
+    return &g_runtime_options;
 }

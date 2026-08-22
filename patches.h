@@ -6,6 +6,11 @@ typedef struct {
     DWORD end;
 }PATCH_OFFSET;
 
+typedef struct {
+    BOOL player_color_focus_primary;
+    BOOL player_color_focus_linked;
+} PATCH_RUNTIME_OPTIONS;
+
 #define GET_MEM_ADDRESS(a) \
     ((DWORD)GetModuleHandleA(NULL) + (a) + ( \
     (a) >= 0x0FF600 + 0x10A00 ? -(int)GetModuleHandleA(NULL) - (a) : \
@@ -22,5 +27,6 @@ typedef struct {
 extern char g_patches_debug_str[];
 
 int patches_apply(HMODULE mod);
+const PATCH_RUNTIME_OPTIONS *patches_get_runtime_options(void);
 
 #endif
