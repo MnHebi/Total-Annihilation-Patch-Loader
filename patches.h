@@ -9,6 +9,8 @@ typedef struct {
 typedef struct {
     BOOL player_color_focus_primary;
     BOOL player_color_focus_linked;
+    BOOL buildable_bridges;
+    BOOL bridge_traversal;
 } PATCH_RUNTIME_OPTIONS;
 
 #define GET_MEM_ADDRESS(a) \
