@@ -10,7 +10,9 @@ char g_patches_debug_str[512];
 static PATCH_OFFSET g_patches_offsets[4096];
 static PATCH_RUNTIME_OPTIONS g_runtime_options = {
     TRUE, /* PlayerColorFocusPrimary */
-    TRUE  /* PlayerColorFocusLinked */
+    TRUE, /* PlayerColorFocusLinked */
+    FALSE, /* BuildableBridges */
+    FALSE /* BridgeTraversal */
 };
 
 static int patches_read_yes_no(
@@ -344,6 +346,22 @@ static int patches_apply_presets(void* user, const char* section, const char* na
             name,
             value,
             &g_runtime_options.player_color_focus_linked);
+    }
+    else if (_strcmpi(name, "BuildableBridges") == 0)
+    {
+        return patches_read_yes_no(
+            section,
+            name,
+            value,
+            &g_runtime_options.buildable_bridges);
+    }
+    else if (_strcmpi(name, "BridgeTraversal") == 0)
+    {
+        return patches_read_yes_no(
+            section,
+            name,
+            value,
+            &g_runtime_options.bridge_traversal);
     }
     else
     {

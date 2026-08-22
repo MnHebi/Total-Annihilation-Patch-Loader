@@ -4,6 +4,7 @@
 #include "patch.h"
 #include "patches.h"
 #include "color_focus_fix.h"
+#include "buildable_bridges.h"
 
 #define TA_DDRAW_DLL_STR     ((char*)0x004FF618)
 #define TA_MP_VERSION_MAJOR *((BYTE*)0x0049E9C0)
@@ -70,6 +71,23 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
                 NULL,
                 color_focus_error,
                 "Total Annihilation Player-Color Focus Fix",
+                MB_OK | MB_ICONERROR);
+
+            exit(1);
+            return FALSE;
+        }
+
+        char buildable_bridges_error[256] = { 0 };
+        if (!buildable_bridges_install(
+                runtime_options->buildable_bridges,
+                runtime_options->bridge_traversal,
+                buildable_bridges_error,
+                sizeof(buildable_bridges_error)))
+        {
+            MessageBoxA(
+                NULL,
+                buildable_bridges_error,
+                "Total Annihilation Buildable Bridges",
                 MB_OK | MB_ICONERROR);
 
             exit(1);

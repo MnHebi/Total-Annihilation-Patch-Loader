@@ -16,6 +16,7 @@
     <ClCompile Include="dllmain.c" />
     <ClCompile Include="patches.c" />
     <ClCompile Include="color_focus_fix.c" />
+    <ClCompile Include="buildable_bridges.c" />
     <ClCompile Include="inih\ini.c">
       <Filter>inih</Filter>
     </ClCompile>
@@ -24,6 +25,7 @@
     <ClInclude Include="patch.h" />
     <ClInclude Include="patches.h" />
     <ClInclude Include="color_focus_fix.h" />
+    <ClInclude Include="buildable_bridges.h" />
     <ClInclude Include="inih\ini.h">
       <Filter>inih</Filter>
     </ClInclude>

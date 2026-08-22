@@ -17,6 +17,7 @@ OBJS         = \
 				dllmain.o \
 				patches.o \
 				color_focus_fix.o \
+				buildable_bridges.o \
 				inih/ini.o
 
 .PHONY: default clean
