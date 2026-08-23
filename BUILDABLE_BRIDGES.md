@@ -41,7 +41,7 @@ The hook stores `0x00` for `.` and `0x01` for `=`. All other yardmap characters 
 their original handlers are unchanged. `TotalA.exe` is never modified on disk.
 
 With `BuildableBridges=No` (the default), neither address is signature-checked or
-modified.
+modified. The acid-water protection described below is also left untouched.
 
 ## Traversal patch
 
@@ -50,6 +50,7 @@ the following additional locations in memory:
 
 ```text
 0040D7B0  Add a bridge-aware fallback to the pathfinder's packed-grid query.
+0043657B  Read the bridge policy while parsing GlobalHeader.lavaworld.
 0043D912  Recheck a failed moving-unit plot transition against bridge deck.
 0047DFC0  Replace the movement-cell evaluator with a bridge-aware equivalent.
 00486109  Route unit creation height correction through the bridge wrapper.
@@ -97,9 +98,44 @@ stationary buildings are excluded. This makes the height behavior local to the
 unit-update paths instead of globally changing terrain queries used by features,
 projectiles, construction tests, and UI code.
 
+### Map-level impassable-terrain policy
+
+The traversal patch adds one integer property to the map OTA's `[GlobalHeader]`:
+
+```text
+bridgesoverrideimpassableterrain=1;
+```
+
+The default is `1`, including when the property is absent, so existing maps retain
+working bridges. On a map with `lavaworld=1`, set the property to `0` to stop bridge
+deck from overriding the impassable terrain below sea level. The ordinary native
+terrain result then applies. The property does not disable bridge transit over
+normal water on maps where `lavaworld=0`.
+
+TA reads the new property through its existing `TdfFile::GetInt` while parsing the
+adjacent native `lavaworld` property. The hook records both values and returns the
+original `lavaworld` result unchanged. This keeps the policy map-scoped and avoids
+assigning a new field inside TA's fixed map-definition structure.
+
+### Acid-water protection
+
+When `BuildableBridges=Yes`, the installer also validates and redirects the map
+water-damage call at `0048AF32`. TA normally damages any eligible unit whose Y
+coordinate is at or below sea level when `waterdoesdamage` and `waterdamage` are
+enabled. That includes a bridge building whose placement origin is at the deck,
+even though its structure spans above the liquid.
+
+The wrapper suppresses only this environmental damage call, and only when the
+target unit definition's parsed yardmap contains at least one `0x01` bridge cell
+from `=`. Weapon damage, reclaiming, self-destruct, and every other caller of
+`UNITS_MakeDamage` remain unchanged. This protection applies while the bridge is
+under construction as well as after completion.
+
 With `BridgeTraversal=No`, every movement, transition, path-grid, and height hook is
-left untouched. Every multiplayer participant must use identical values for both
-bridge settings and identical bridge unit data.
+left untouched, including the map-level traversal-property hook. Acid protection
+remains part of `BuildableBridges=Yes`. Every multiplayer participant must use
+identical values for both bridge settings, identical bridge unit data, and the same
+map OTA.
 
 ## Runtime validation
 
@@ -117,7 +153,10 @@ Suggested test sequence:
    sections need bridge cells on their touching edges; a `.` border leaves an
    underlying-terrain seam that land pathfinding cannot cross and over which units
    will return to terrain height.
-2. Place it across ordinary impassable terrain, then across lava and water.
+2. Place it across ordinary impassable terrain, then across lava and water. On a
+   `lavaworld=1` test map, confirm the absent/default or explicit value `1` permits
+   transit, while `bridgesoverrideimpassableterrain=0` restores the native blocked
+   result.
 3. Test conventional ground units from multiple movement classes in both directions,
    including units larger than one plot cell.
 4. Confirm builders and other structures cannot overlap the bridge cells.
@@ -126,4 +165,7 @@ Suggested test sequence:
 7. Confirm units remain visually on the deck rather than the terrain below it.
 8. Test hovercraft, ships, submarines, aircraft, amphibious units, and transports for
    unintended height or routing changes around a bridge.
-9. In multiplayer, use identical DLL settings and unit data on every machine.
+9. On a map using `waterdoesdamage=1`, verify a bridge can be completed above acid
+   while ordinary units entering the acid still take the configured damage.
+10. In multiplayer, use identical DLL settings, map OTA, and unit data on every
+    machine.

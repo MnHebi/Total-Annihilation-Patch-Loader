@@ -25,6 +25,11 @@
 #define FIX_YPOS_CALL_UPDATE_UNITS      ((BYTE *)0x0048AFB0)
 #define FIX_YPOS_CALL_SEND_MOVE         ((BYTE *)0x0048BA4C)
 
+#define PARSE_LAVAWORLD_CALL             ((BYTE *)0x0043657B)
+#define TDF_GET_INT                      ((BYTE *)0x004C46C0)
+#define WATER_DAMAGE_CALL                ((BYTE *)0x0048AF32)
+#define UNITS_MAKE_DAMAGE                ((BYTE *)0x00489BB0)
+
 #define TA_DYNMEM_POINTER_ADDRESS       ((BYTE **)0x00511DE8)
 
 #define DYN_MAP_WIDTH_OFFSET            0x14233
@@ -97,11 +102,32 @@ typedef unsigned int (__stdcall *can_attach_unit_fn)(
     int unit_id,
     uint32_t packed_plot_position,
     int occupancy_type);
+typedef int (__thiscall *tdf_get_int_fn)(
+    BYTE *tdf_file,
+    const char *name,
+    int default_value);
+typedef void (__stdcall *units_make_damage_fn)(
+    BYTE *source_unit,
+    BYTE *target_unit,
+    int damage,
+    int damage_type,
+    int unused);
 
 static const units_fix_ypos_fn original_units_fix_ypos =
     (units_fix_ypos_fn)UNITS_FIX_YPOS;
 static const can_attach_unit_fn original_can_attach_unit =
     (can_attach_unit_fn)CAN_ATTACH_UNIT_TO_PIECE;
+static const tdf_get_int_fn original_tdf_get_int =
+    (tdf_get_int_fn)TDF_GET_INT;
+static const units_make_damage_fn original_units_make_damage =
+    (units_make_damage_fn)UNITS_MAKE_DAMAGE;
+
+/*
+ * This OTA policy is read from [GlobalHeader] alongside lavaworld. Missing
+ * keys intentionally preserve bridge transit on every existing map.
+ */
+static BOOL g_map_is_lava_world = FALSE;
+static BOOL g_map_bridges_override_impassable_terrain = TRUE;
 
 static uint16_t read_u16(const BYTE *address)
 {
@@ -218,6 +244,99 @@ static BOOL movement_uses_bridge_surface(const BYTE *movement_class)
         read_i16(movement_class + MOVEMENT_MIN_WATER_DEPTH_OFFSET) <= 0;
 }
 
+static BOOL bridge_surface_supplies_terrain(void)
+{
+    return !g_map_is_lava_world ||
+        g_map_bridges_override_impassable_terrain;
+}
+
+static BOOL unit_definition_has_bridge_surface(const BYTE *definition)
+{
+    const BYTE *yardmap;
+    int footprint_width;
+    int footprint_height;
+    int row;
+
+    if (definition == NULL)
+        return FALSE;
+
+    footprint_width = read_i16(definition + UNITDEF_FOOTPRINT_OFFSET);
+    footprint_height = read_i16(
+        definition + UNITDEF_FOOTPRINT_OFFSET + 2);
+    yardmap = read_pointer(definition + UNITDEF_YARDMAP_OFFSET);
+    if (yardmap == NULL || footprint_width <= 0 || footprint_height <= 0)
+        return FALSE;
+
+    for (row = 0; row < footprint_height; ++row)
+    {
+        int column;
+        for (column = 0; column < footprint_width; ++column)
+        {
+            if ((yardmap[row * footprint_width + column] &
+                    YARDMAP_BRIDGE_CELL) != 0)
+            {
+                return TRUE;
+            }
+        }
+    }
+
+    return FALSE;
+}
+
+/*
+ * Parse the new map property while TA is reading lavaworld from the same
+ * [GlobalHeader] section. The wrapper returns lavaworld unchanged.
+ */
+static int __fastcall bridge_parse_lavaworld_option(
+    BYTE *tdf_file,
+    void *unused_edx,
+    const char *name,
+    int default_value)
+{
+    int lava_world;
+
+    (void)unused_edx;
+
+    lava_world = original_tdf_get_int(tdf_file, name, default_value);
+    g_map_is_lava_world = lava_world != 0;
+    g_map_bridges_override_impassable_terrain =
+        original_tdf_get_int(
+            tdf_file,
+            "bridgesoverrideimpassableterrain",
+            1) != 0;
+    return lava_world;
+}
+
+/*
+ * Acid-water damage is applied solely from AutoHealAndAimLoop after checking
+ * the target unit against sea level. A bridge deck can span the damaging
+ * liquid without touching it, so suppress only that environmental call for
+ * definitions containing an actual '=' bridge cell.
+ */
+static void __stdcall bridge_water_damage(
+    BYTE *source_unit,
+    BYTE *target_unit,
+    int damage,
+    int damage_type,
+    int unused)
+{
+    BYTE *definition = target_unit == NULL ? NULL :
+        read_pointer(target_unit + UNIT_DEFINITION_OFFSET);
+
+    if (damage_type == 0x0B &&
+        unit_definition_has_bridge_surface(definition))
+    {
+        return;
+    }
+
+    original_units_make_damage(
+        source_unit,
+        target_unit,
+        damage,
+        damage_type,
+        unused);
+}
+
 static BOOL bridge_footprint_contains_surface(
     const BYTE *dynmem,
     const BYTE *movement_class,
@@ -232,6 +351,7 @@ static BOOL bridge_footprint_contains_surface(
     int row;
 
     if (dynmem == NULL ||
+        !bridge_surface_supplies_terrain() ||
         !movement_uses_bridge_surface(movement_class))
         return FALSE;
 
@@ -314,6 +434,7 @@ static unsigned int __stdcall bridge_movement_cell_evaluator(
 
             /* A bridge supplies a level, solid movement surface here. */
             if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0 &&
+                bridge_surface_supplies_terrain() &&
                 movement_uses_bridge_surface(movement_class))
             {
                 plot += PLOT_RECORD_SIZE;
@@ -457,7 +578,8 @@ static unsigned int __stdcall bridge_can_attach_moving_unit(
         unit_definition == NULL ||
         occupancy_type != 1 ||
         unit_definition[UNITDEF_TERRAIN_CHECK_OFFSET] == 0 ||
-        read_i16(unit_definition + UNITDEF_MIN_WATER_DEPTH_OFFSET) > 0)
+        read_i16(unit_definition + UNITDEF_MIN_WATER_DEPTH_OFFSET) > 0 ||
+        !bridge_surface_supplies_terrain())
     {
         return original_result;
     }
@@ -666,6 +788,7 @@ static void __stdcall bridge_units_fix_ypos(BYTE *unit)
     original_units_fix_ypos(unit);
 
     if (!original_will_recompute || unit == NULL ||
+        !bridge_surface_supplies_terrain() ||
         (read_u32(unit + UNIT_RUNTIME_FLAGS_OFFSET) &
             UNIT_BUILDING_FLAG) != 0)
     {
@@ -821,6 +944,16 @@ BOOL buildable_bridges_install(
         return FALSE;
     }
 
+    if (enable_parser &&
+        !call_targets(WATER_DAMAGE_CALL, UNITS_MAKE_DAMAGE))
+    {
+        if (error && error_size)
+            sprintf_s(error, error_size,
+                "The water-damage call site does not match the supported "
+                "TotalA.exe. Bridge acid protection was not installed.");
+        return FALSE;
+    }
+
     if (enable_traversal &&
         memcmp(MOVEMENT_CELL_EVALUATOR,
             expected_movement_evaluator,
@@ -841,6 +974,16 @@ BOOL buildable_bridges_install(
         if (error && error_size)
             sprintf_s(error, error_size,
                 "The path-grid query does not match the supported "
+                "TotalA.exe. Bridge traversal was not installed.");
+        return FALSE;
+    }
+
+    if (enable_traversal &&
+        !call_targets(PARSE_LAVAWORLD_CALL, TDF_GET_INT))
+    {
+        if (error && error_size)
+            sprintf_s(error, error_size,
+                "The map-option call site does not match the supported "
                 "TotalA.exe. Bridge traversal was not installed.");
         return FALSE;
     }
@@ -883,10 +1026,16 @@ BOOL buildable_bridges_install(
             (char)0x90,
             (char *)YARDMAP_DOT_HANDLER + sizeof(expected_dot_handler));
         (void)patch_setbyte(YARDMAP_EQUALS_CASE, 0x00);
+        (void)patch_call(
+            (char *)WATER_DAMAGE_CALL,
+            (char *)bridge_water_damage);
     }
 
     if (enable_traversal)
     {
+        (void)patch_call(
+            (char *)PARSE_LAVAWORLD_CALL,
+            (char *)bridge_parse_lavaworld_option);
         patch_ljmp(
             (char *)MOVEMENT_CELL_EVALUATOR,
             (char *)bridge_movement_cell_evaluator);
