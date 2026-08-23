@@ -128,6 +128,7 @@ static const units_make_damage_fn original_units_make_damage =
  */
 static BOOL g_map_is_lava_world = FALSE;
 static BOOL g_map_bridges_override_impassable_terrain = TRUE;
+static BOOL g_bridge_traversal_enabled = FALSE;
 
 static uint16_t read_u16(const BYTE *address)
 {
@@ -283,6 +284,53 @@ static BOOL unit_definition_has_bridge_surface(const BYTE *definition)
     return FALSE;
 }
 
+static BOOL unit_is_on_bridge_surface(
+    const BYTE *unit,
+    const BYTE *definition)
+{
+    BYTE *dynmem;
+    BYTE *plot_map;
+    int map_width;
+    int map_height;
+    int plot_x;
+    int plot_z;
+    uint32_t definition_flags;
+
+    if (!g_bridge_traversal_enabled ||
+        !bridge_surface_supplies_terrain() ||
+        unit == NULL || definition == NULL)
+    {
+        return FALSE;
+    }
+
+    definition_flags = read_u32(definition + UNITDEF_FLAGS_OFFSET);
+    if ((definition_flags & (UNITDEF_CAN_FLY_FLAG |
+            UNITDEF_CAN_HOVER_FLAG | UNITDEF_FLOATER_FLAG)) != 0 ||
+        read_i16(definition + UNITDEF_MIN_WATER_DEPTH_OFFSET) > 0)
+    {
+        return FALSE;
+    }
+
+    dynmem = *TA_DYNMEM_POINTER_ADDRESS;
+    if (dynmem == NULL)
+        return FALSE;
+
+    map_width = read_i32(dynmem + DYN_MAP_WIDTH_OFFSET);
+    map_height = read_i32(dynmem + DYN_MAP_HEIGHT_OFFSET);
+    plot_x = (int16_t)(read_i32(unit + UNIT_POSITION_X_OFFSET) >> 16) >> 4;
+    plot_z = (int16_t)(read_i32(unit + UNIT_POSITION_Z_OFFSET) >> 16) >> 4;
+    if (plot_x < 0 || plot_z < 0 ||
+        plot_x >= map_width || plot_z >= map_height)
+    {
+        return FALSE;
+    }
+
+    plot_map = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
+    return plot_map != NULL &&
+        (plot_map[(plot_z * map_width + plot_x) * PLOT_RECORD_SIZE +
+            PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0;
+}
+
 /*
  * Parse the new map property while TA is reading lavaworld from the same
  * [GlobalHeader] section. The wrapper returns lavaworld unchanged.
@@ -311,7 +359,7 @@ static int __fastcall bridge_parse_lavaworld_option(
  * Acid-water damage is applied solely from AutoHealAndAimLoop after checking
  * the target unit against sea level. A bridge deck can span the damaging
  * liquid without touching it, so suppress only that environmental call for
- * definitions containing an actual '=' bridge cell.
+ * bridge definitions and conventional ground units supported by bridge deck.
  */
 static void __stdcall bridge_water_damage(
     BYTE *source_unit,
@@ -324,7 +372,8 @@ static void __stdcall bridge_water_damage(
         read_pointer(target_unit + UNIT_DEFINITION_OFFSET);
 
     if (damage_type == 0x0B &&
-        unit_definition_has_bridge_surface(definition))
+        (unit_definition_has_bridge_surface(definition) ||
+            unit_is_on_bridge_surface(target_unit, definition)))
     {
         return;
     }
@@ -1015,6 +1064,8 @@ BOOL buildable_bridges_install(
             }
         }
     }
+
+    g_bridge_traversal_enabled = enable_traversal;
 
     if (enable_parser)
     {

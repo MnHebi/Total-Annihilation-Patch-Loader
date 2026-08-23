@@ -127,9 +127,13 @@ even though its structure spans above the liquid.
 
 The wrapper suppresses only this environmental damage call, and only when the
 target unit definition's parsed yardmap contains at least one `0x01` bridge cell
-from `=`. Weapon damage, reclaiming, self-destruct, and every other caller of
-`UNITS_MakeDamage` remain unchanged. This protection applies while the bridge is
-under construction as well as after completion.
+from `=`, or when a conventional non-naval ground unit's center plot is supported
+by active bridge deck. Ships and submarines travelling in the liquid beneath a
+bridge are not protected. The map's impassable-terrain policy must permit the deck
+before a unit standing there receives protection. Weapon damage, reclaiming,
+self-destruct, and every other caller of `UNITS_MakeDamage` remain unchanged. The
+bridge's own protection applies while it is under construction as well as after
+completion.
 
 With `BridgeTraversal=No`, every movement, transition, path-grid, and height hook is
 left untouched, including the map-level traversal-property hook. Acid protection
@@ -166,6 +170,8 @@ Suggested test sequence:
 8. Test hovercraft, ships, submarines, aircraft, amphibious units, and transports for
    unintended height or routing changes around a bridge.
 9. On a map using `waterdoesdamage=1`, verify a bridge can be completed above acid
-   while ordinary units entering the acid still take the configured damage.
+   and a conventional ground unit standing on its deck remains unharmed, while an
+   ordinary unit entering the acid and a ship underneath the bridge still take the
+   configured damage.
 10. In multiplayer, use identical DLL settings, map OTA, and unit data on every
     machine.

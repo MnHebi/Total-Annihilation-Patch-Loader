@@ -39,7 +39,9 @@ Maps can opt out of using bridge deck to cross `lavaworld` terrain by adding
 defaults to `1`, so existing maps need no changes and ordinary water bridges are
 unaffected. Bridge unit definitions containing at least one `=` cell are also
 excluded from the map's acid-water damage call: the damaging liquid remains below
-the deck and no longer destroys the bridge during construction.
+the deck and no longer destroys the bridge during construction. Conventional
+ground units supported by active bridge deck are excluded from that environmental
+damage as well; ships passing underneath remain exposed to the liquid.
 
 The generic defaults are `No`; this test build enables both settings in
 `res/patches.ini`. Every player in a multiplayer game must use the same settings and
