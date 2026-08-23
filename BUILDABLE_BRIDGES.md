@@ -64,12 +64,6 @@ blocking-feature, unit-clearance, water-depth, and slope tests. A cell carrying 
 flag `0x02` retains the feature and unit tests but is treated as a level supported
 surface rather than the underlying water or lava terrain.
 
-The supplied 5x5 test bridge uses `.....` followed by four `.====` yardmap rows.
-Adjacent copies consequently leave a one-plot unmarked row or column between
-their flagged deck cells. The traversal patch recognizes an unmarked plot as a
-section seam only when bridge flags bound it on opposite sides. This closes that
-specific joint while leaving exposed `.` border cells as ordinary terrain.
-
 The path-grid query preserves the original visibility and cached-grid result. Only
 when that result is blocked and the candidate footprint contains at least one
 bridge cell does it recalculate the candidate. Bridge cells are treated as deck.
@@ -82,9 +76,7 @@ depth and slope tests remain in force while any overlapping bridge plots are
 supported individually; this is necessary at both bridge ends, where a unit must
 straddle shore and deck before it can stand wholly on either. The center condition
 prevents an incidental peripheral overlap from creating passable terrain beside
-the bridge. A one-plot section seam bounded by bridge flags on opposite sides
-counts as deck for this center test. The recalculation also reproduces the
-original movement grid's four
+the bridge. The recalculation also reproduces the original movement grid's four
 perimeter checks and edge-cost result. Ordinary water or lava away from a deck
 center therefore remains unchanged. Movement classes requiring positive water
 depth retain the underlying terrain result, so ships continue beneath
@@ -183,9 +175,9 @@ Suggested test sequence:
 1. Create or select a bridge unit whose `FootprintX` by `FootprintZ` yardmap uses
    `=` for every intended deck cell. Ensure the yardmap has exactly one recognized
    character per footprint cell (whitespace is allowed and ignored). Adjacent
-   sections should normally have bridge cells on their touching edges. The patch
-   can join a one-cell `.` seam when bridge cells bound it on opposite sides, but
-   wider gaps remain underlying terrain.
+   sections need bridge cells on their touching edges; a `.` border leaves an
+   underlying-terrain seam that land pathfinding cannot cross and over which units
+   will return to terrain height.
 2. Place it across ordinary impassable terrain, then across lava and water. On a
    `lavaworld=1` test map, confirm the absent/default or explicit value `1` permits
    transit, while `bridgesoverrideimpassableterrain=0` restores the native blocked
