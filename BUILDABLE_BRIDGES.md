@@ -64,6 +64,14 @@ blocking-feature, unit-clearance, water-depth, and slope tests. A cell carrying 
 flag `0x02` retains the feature and unit tests but is treated as a level supported
 surface rather than the underlying water or lava terrain.
 
+TA also records the stationary bridge building as the occupying unit on its
+footprint. The traversal evaluator ignores that building's normal unit-clearance
+failure only on a plot that is both marked as bridge deck and occupied by a unit
+definition containing `=`. This permits traffic to share the deck with the bridge
+that supplies it without making the bridge's unmarked footprint cells, ordinary
+buildings, or moving units nonblocking. The same narrow exception is applied to
+the later `CanAttachUnitToPiece` movement gate.
+
 The path-grid query preserves the original visibility and cached-grid result. Only
 when that result is blocked and the candidate footprint contains at least one
 bridge cell does it recalculate the candidate. Bridge cells are treated as deck.

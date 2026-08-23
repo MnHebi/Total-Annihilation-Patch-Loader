@@ -45,6 +45,8 @@ excluded from the map's acid-water damage call: the damaging liquid remains belo
 the deck and no longer destroys the bridge during construction. Conventional
 ground units supported by active bridge deck are excluded from that environmental
 damage as well; ships passing underneath remain exposed to the liquid.
+The bridge building itself does not obstruct movement on its marked `=` plots;
+unmarked plots and all unrelated unit occupancy remain blocking.
 
 When an amphibious ground unit can traverse both routes, ordinary water immediately
 beside active bridge deck receives TA's passable edge/slow path cost. This breaks

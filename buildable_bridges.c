@@ -215,6 +215,42 @@ static BOOL plot_feature_blocks(
             FEATURE_BLOCKING_FLAG_OFFSET] & FEATURE_BLOCKING_FLAG) != 0;
 }
 
+static BOOL bridge_surface_supplies_terrain(void);
+static BOOL unit_definition_has_bridge_surface(const BYTE *definition);
+static BOOL movement_uses_bridge_surface(const BYTE *movement_class);
+
+static BOOL plot_occupied_by_bridge_surface_unit(
+    const BYTE *dynmem,
+    const BYTE *plot)
+{
+    uint16_t unit_id;
+    BYTE *unit_array;
+    BYTE *unit_object;
+    BYTE *unit_definition;
+
+    if (dynmem == NULL || plot == NULL ||
+        (plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) == 0)
+    {
+        return FALSE;
+    }
+
+    unit_id = read_u16(plot + PLOT_UNIT_ID_OFFSET);
+    if (unit_id == 0)
+        return FALSE;
+
+    unit_array = read_pointer(dynmem + DYN_UNIT_ARRAY_OFFSET);
+    if (unit_array == NULL)
+        return FALSE;
+
+    unit_object = read_pointer(
+        unit_array + (unsigned int)unit_id * UNIT_ARRAY_RECORD_SIZE);
+    if (unit_object == NULL)
+        return FALSE;
+
+    unit_definition = read_pointer(unit_object + UNIT_DEFINITION_OFFSET);
+    return unit_definition_has_bridge_surface(unit_definition);
+}
+
 static BOOL plot_unit_blocks(
     const BYTE *dynmem,
     const BYTE *plot,
@@ -233,9 +269,24 @@ static BOOL plot_unit_blocks(
 
     unit_object = read_pointer(
         unit_array + (unsigned int)unit_id * UNIT_ARRAY_RECORD_SIZE);
-    return unit_object == NULL ||
-        read_u32(unit_object + UNIT_OBJECT_CLEARANCE_OFFSET) <
-            read_u32(movement_class + MOVEMENT_UNIT_CLEARANCE_OFFSET);
+    if (unit_object == NULL)
+        return TRUE;
+
+    if (read_u32(unit_object + UNIT_OBJECT_CLEARANCE_OFFSET) >=
+        read_u32(movement_class + MOVEMENT_UNIT_CLEARANCE_OFFSET))
+    {
+        return FALSE;
+    }
+
+    /*
+     * The building that contributes a bridge plot remains recorded as that
+     * plot's occupying unit.  Its normal zero clearance must not make its own
+     * marked deck impassable, but unmarked plots and all other units retain
+     * TA's original clearance test.
+     */
+    return !bridge_surface_supplies_terrain() ||
+        !movement_uses_bridge_surface(movement_class) ||
+        !plot_occupied_by_bridge_surface_unit(dynmem, plot);
 }
 
 static BOOL movement_uses_bridge_surface(const BYTE *movement_class)
@@ -822,7 +873,9 @@ static unsigned int __stdcall bridge_can_attach_moving_unit(
                 plot + PLOT_UNIT_ID_OFFSET);
 
             if (plot_feature_blocks(dynmem, plot, map_width) ||
-                (occupying_unit != 0 && occupying_unit != (uint16_t)unit_id))
+                (occupying_unit != 0 &&
+                    occupying_unit != (uint16_t)unit_id &&
+                    !plot_occupied_by_bridge_surface_unit(dynmem, plot)))
             {
                 return 0;
             }
