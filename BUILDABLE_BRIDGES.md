@@ -97,15 +97,19 @@ plots, blocking features, and other-unit occupancy preserved. This allows the
 unit to execute a route over the bridge rather than merely calculate one.
 
 The height wrapper first executes the original `UNITS_FixYPos`. When that call has
-recomputed the height of a conventional moving ground unit whose center is on a
-bridge cell, the wrapper uses the higher of its terrain-derived height or the map
-water surface as the top plane of a deck-aligned bridge model and levels pitch and
-roll. The bridge's thickness must extend downward from that origin rather than
-upward. The height-dirty bit is checked before the original call so periodic no-op
-calls cannot add a deck offset repeatedly. Aircraft, hovercraft, floaters, and
-stationary buildings are excluded. This makes the height behavior local to the
-unit-update paths instead of globally changing terrain queries used by features,
-projectiles, construction tests, and UI code.
+recomputed the height of a conventional moving ground unit whose occupied
+footprint contains a bridge cell, the wrapper uses the higher of its
+terrain-derived height or the map water surface as the top plane of a deck-aligned
+bridge model and levels pitch and roll. It reads the occupied plot origin and
+orientation-adjusted dimensions cached by TA's movement controller, matching the
+same odd/even and rotated footprint anchoring used by `CanAttachUnitToPiece`. This
+keeps a unit supported while its center straddles an outer edge or the boundary
+between adjacent bridge sections. The bridge's thickness must extend downward
+from that origin rather than upward. The height-dirty bit is checked before the
+original call so periodic no-op calls cannot add a deck offset repeatedly.
+Aircraft, hovercraft, floaters, and stationary buildings are excluded. This makes
+the height behavior local to the unit-update paths instead of globally changing
+terrain queries used by features, projectiles, construction tests, and UI code.
 
 ### Map-level impassable-terrain policy
 
@@ -136,10 +140,10 @@ even though its structure spans above the liquid.
 
 The wrapper suppresses only this environmental damage call, and only when the
 target unit definition's parsed yardmap contains at least one `0x01` bridge cell
-from `=`, or when a conventional non-naval ground unit's center plot is supported
-by active bridge deck. Ships and submarines travelling in the liquid beneath a
-bridge are not protected. The map's impassable-terrain policy must permit the deck
-before a unit standing there receives protection. Weapon damage, reclaiming,
+from `=`, or when a conventional non-naval ground unit's occupied footprint
+overlaps active bridge deck. Ships and submarines travelling in the liquid beneath
+a bridge are not protected. The map's impassable-terrain policy must permit the
+deck before a unit standing there receives protection. Weapon damage, reclaiming,
 self-destruct, and every other caller of `UNITS_MakeDamage` remain unchanged. The
 bridge's own protection applies while it is under construction as well as after
 completion.
@@ -177,7 +181,9 @@ Suggested test sequence:
 4. Confirm builders and other structures cannot overlap the bridge cells.
 5. Destroy or reclaim the bridge and confirm paths are invalidated immediately.
 6. Test save/load, AI pathing, queued construction, and adjacent bridge sections.
-7. Confirm units remain visually on the deck rather than the terrain below it.
+7. Confirm units remain visually on the deck rather than the terrain below it,
+   including while walking along an outer edge and across the boundary between
+   adjacent sections. Include odd- and even-sized footprints if available.
 8. Test hovercraft, ships, submarines, aircraft, amphibious units, and transports for
    unintended height or routing changes around a bridge.
 9. On a map using `waterdoesdamage=1`, verify a bridge can be completed above acid

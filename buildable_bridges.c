@@ -54,9 +54,9 @@
 /* A deck-aligned bridge model places its walkable top at its Y origin. */
 #define BRIDGE_DECK_SURFACE_OFFSET      0
 
-#define UNIT_POSITION_X_OFFSET          0x06A
 #define UNIT_POSITION_Y_OFFSET          0x06E
-#define UNIT_POSITION_Z_OFFSET          0x072
+#define UNIT_CURRENT_PLOT_OFFSET         0x076
+#define UNIT_CURRENT_FOOTPRINT_OFFSET    0x07E
 #define UNIT_DEFINITION_OFFSET          0x092
 #define UNIT_RUNTIME_FLAGS_OFFSET       0x110
 #define UNIT_BUILDING_FLAG              0x20000000u
@@ -284,16 +284,67 @@ static BOOL unit_definition_has_bridge_surface(const BYTE *definition)
     return FALSE;
 }
 
+/*
+ * MovingUnit? stores the occupied plot rectangle at unit+0x76 and its
+ * orientation-adjusted dimensions at unit+0x7e.  These are the same values
+ * TA passes to CanAttachUnitToPiece and later installs in the plot map, so
+ * they remain correct for both odd/even footprints and rotated units.
+ */
+static BOOL unit_footprint_contains_bridge_surface(
+    const BYTE *dynmem,
+    const BYTE *unit)
+{
+    BYTE *plot;
+    int map_width;
+    int map_height;
+    int plot_x;
+    int plot_z;
+    int footprint_width;
+    int footprint_height;
+    int row;
+
+    if (dynmem == NULL || unit == NULL)
+        return FALSE;
+
+    map_width = read_i32(dynmem + DYN_MAP_WIDTH_OFFSET);
+    map_height = read_i32(dynmem + DYN_MAP_HEIGHT_OFFSET);
+    plot_x = read_i16(unit + UNIT_CURRENT_PLOT_OFFSET);
+    plot_z = read_i16(unit + UNIT_CURRENT_PLOT_OFFSET + 2);
+    footprint_width = read_i16(unit + UNIT_CURRENT_FOOTPRINT_OFFSET);
+    footprint_height = read_i16(unit + UNIT_CURRENT_FOOTPRINT_OFFSET + 2);
+    if (plot_x < 0 || plot_z < 0 ||
+        footprint_width <= 0 || footprint_height <= 0 ||
+        plot_x + footprint_width > map_width ||
+        plot_z + footprint_height > map_height)
+    {
+        return FALSE;
+    }
+
+    plot = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
+    if (plot == NULL)
+        return FALSE;
+    plot += (plot_z * map_width + plot_x) * PLOT_RECORD_SIZE;
+
+    for (row = 0; row < footprint_height; ++row)
+    {
+        int column;
+        for (column = 0; column < footprint_width; ++column)
+        {
+            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+                return TRUE;
+            plot += PLOT_RECORD_SIZE;
+        }
+        plot += (map_width - footprint_width) * PLOT_RECORD_SIZE;
+    }
+
+    return FALSE;
+}
+
 static BOOL unit_is_on_bridge_surface(
     const BYTE *unit,
     const BYTE *definition)
 {
     BYTE *dynmem;
-    BYTE *plot_map;
-    int map_width;
-    int map_height;
-    int plot_x;
-    int plot_z;
     uint32_t definition_flags;
 
     if (!g_bridge_traversal_enabled ||
@@ -312,23 +363,7 @@ static BOOL unit_is_on_bridge_surface(
     }
 
     dynmem = *TA_DYNMEM_POINTER_ADDRESS;
-    if (dynmem == NULL)
-        return FALSE;
-
-    map_width = read_i32(dynmem + DYN_MAP_WIDTH_OFFSET);
-    map_height = read_i32(dynmem + DYN_MAP_HEIGHT_OFFSET);
-    plot_x = (int16_t)(read_i32(unit + UNIT_POSITION_X_OFFSET) >> 16) >> 4;
-    plot_z = (int16_t)(read_i32(unit + UNIT_POSITION_Z_OFFSET) >> 16) >> 4;
-    if (plot_x < 0 || plot_z < 0 ||
-        plot_x >= map_width || plot_z >= map_height)
-    {
-        return FALSE;
-    }
-
-    plot_map = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
-    return plot_map != NULL &&
-        (plot_map[(plot_z * map_width + plot_x) * PLOT_RECORD_SIZE +
-            PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0;
+    return unit_footprint_contains_bridge_surface(dynmem, unit);
 }
 
 /*
@@ -908,15 +943,7 @@ static void __stdcall bridge_units_fix_ypos(BYTE *unit)
 {
     BYTE *definition;
     BYTE *dynmem;
-    BYTE *plot_map;
-    BYTE *plot;
     uint32_t definition_flags;
-    int map_x;
-    int map_z;
-    int plot_x;
-    int plot_z;
-    int map_width;
-    int map_height;
     int32_t original_y;
     int32_t water_y;
     int32_t deck_y;
@@ -953,26 +980,7 @@ static void __stdcall bridge_units_fix_ypos(BYTE *unit)
     }
 
     dynmem = *TA_DYNMEM_POINTER_ADDRESS;
-    if (dynmem == NULL)
-        return;
-
-    map_width = read_i32(dynmem + DYN_MAP_WIDTH_OFFSET);
-    map_height = read_i32(dynmem + DYN_MAP_HEIGHT_OFFSET);
-    map_x = (int16_t)(read_i32(unit + UNIT_POSITION_X_OFFSET) >> 16);
-    map_z = (int16_t)(read_i32(unit + UNIT_POSITION_Z_OFFSET) >> 16);
-    plot_x = map_x >> 4;
-    plot_z = map_z >> 4;
-    if (plot_x < 0 || plot_z < 0 || plot_x >= map_width ||
-        plot_z >= map_height)
-    {
-        return;
-    }
-
-    plot_map = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
-    if (plot_map == NULL)
-        return;
-    plot = plot_map + (plot_z * map_width + plot_x) * PLOT_RECORD_SIZE;
-    if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) == 0)
+    if (!unit_footprint_contains_bridge_surface(dynmem, unit))
         return;
 
     /*
