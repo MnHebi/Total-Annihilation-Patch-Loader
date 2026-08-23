@@ -78,6 +78,15 @@ bridges instead of treating the deck as navigable terrain. A bridge unit's FBI
 `WaterLine` is not consulted by either path calculation—it affects model placement,
 not traversal.
 
+Flat bridge deck and traversable water can both receive packed-grid value `3`.
+TA's main A* search treats either as preferred, so an amphibious unit may choose an
+equal-length water route beside a bridge. The query wrapper detects a non-bridge,
+submerged ground-unit footprint whose one-cell perimeter touches active bridge
+deck and returns value `1` instead. That value remains passable but adds `0x1E`
+(one orthogonal step) to the A* route cost. The bridge therefore wins the local
+tie, while water farther from the bridge and all naval movement retain their
+native values.
+
 Route creation is not the last terrain test. When a ground unit's center crosses a
 plot boundary, the local movement controller calls `CanAttachUnitToPiece` and
 clamps the unit back into its previous plot if the new footprint fails the unit
@@ -162,7 +171,9 @@ Suggested test sequence:
    transit, while `bridgesoverrideimpassableterrain=0` restores the native blocked
    result.
 3. Test conventional ground units from multiple movement classes in both directions,
-   including units larger than one plot cell.
+   including units larger than one plot cell. With an amphibious unit such as a
+   Commander, verify the route prefers completed deck over the adjacent water but
+   can still use that water when the bridge route is incomplete.
 4. Confirm builders and other structures cannot overlap the bridge cells.
 5. Destroy or reclaim the bridge and confirm paths are invalidated immediately.
 6. Test save/load, AI pathing, queued construction, and adjacent bridge sections.

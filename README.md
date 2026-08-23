@@ -43,6 +43,11 @@ the deck and no longer destroys the bridge during construction. Conventional
 ground units supported by active bridge deck are excluded from that environmental
 damage as well; ships passing underneath remain exposed to the liquid.
 
+When an amphibious ground unit can traverse both routes, ordinary water immediately
+beside active bridge deck receives TA's passable edge/slow path cost. This breaks
+the otherwise equal-cost tie in favor of the bridge without blocking the water or
+changing water elsewhere on the map. Naval movement remains unchanged.
+
 The generic defaults are `No`; this test build enables both settings in
 `res/patches.ini`. Every player in a multiplayer game must use the same settings and
 unit data. See `BUILDABLE_BRIDGES.md` for the reverse-engineering evidence, exact

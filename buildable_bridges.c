@@ -435,6 +435,96 @@ static BOOL bridge_footprint_contains_surface(
     return FALSE;
 }
 
+/*
+ * TA gives both flat bridge deck and ordinary traversable water the preferred
+ * packed-grid value (3). The A* search therefore has no reason to select the
+ * deck for an amphibious ground unit. Identify an ordinary submerged footprint
+ * immediately beside bridge deck so the query can return the still-passable
+ * edge/slow value (1), which adds one orthogonal-step cost to that water cell.
+ */
+static BOOL ordinary_water_footprint_touches_bridge(
+    const BYTE *dynmem,
+    const BYTE *movement_class,
+    int x,
+    int z)
+{
+    BYTE *plot_map;
+    int map_width;
+    int map_height;
+    int footprint_width;
+    int footprint_height;
+    int water_level;
+    int row;
+
+    if (dynmem == NULL ||
+        !bridge_surface_supplies_terrain() ||
+        !movement_uses_bridge_surface(movement_class))
+    {
+        return FALSE;
+    }
+
+    map_width = read_i32(dynmem + DYN_MAP_WIDTH_OFFSET);
+    map_height = read_i32(dynmem + DYN_MAP_HEIGHT_OFFSET);
+    footprint_width = read_i16(movement_class + 4);
+    footprint_height = read_i16(movement_class + 6);
+    if (footprint_width <= 0 || footprint_height <= 0 ||
+        x < 0 || z < 0 || x + footprint_width >= map_width ||
+        z + footprint_height >= map_height)
+    {
+        return FALSE;
+    }
+
+    plot_map = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
+    if (plot_map == NULL)
+        return FALSE;
+
+    water_level = dynmem[DYN_WATER_LEVEL_OFFSET];
+    if (plot_map[((z + footprint_height / 2) * map_width +
+            x + footprint_width / 2) * PLOT_RECORD_SIZE +
+            PLOT_MIN_HEIGHT_OFFSET] >= water_level)
+    {
+        return FALSE;
+    }
+
+    for (row = 0; row < footprint_height; ++row)
+    {
+        int column;
+        const BYTE *plot = plot_map +
+            ((z + row) * map_width + x) * PLOT_RECORD_SIZE;
+
+        for (column = 0; column < footprint_width; ++column)
+        {
+            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+                return FALSE;
+            plot += PLOT_RECORD_SIZE;
+        }
+    }
+
+    for (row = z - 1; row <= z + footprint_height; ++row)
+    {
+        int column;
+        for (column = x - 1; column <= x + footprint_width; ++column)
+        {
+            const BYTE *plot;
+
+            if (column < 0 || row < 0 ||
+                column >= map_width || row >= map_height ||
+                (column >= x && column < x + footprint_width &&
+                    row >= z && row < z + footprint_height))
+            {
+                continue;
+            }
+
+            plot = plot_map +
+                (row * map_width + column) * PLOT_RECORD_SIZE;
+            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+                return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 static unsigned int __stdcall bridge_movement_cell_evaluator(
     BYTE *movement_class,
     int x,
@@ -802,6 +892,13 @@ static unsigned int __fastcall bridge_path_grid_query(
             movement_class,
             (int)x,
             (int)z);
+    }
+
+    /* Prefer deck without making the adjacent water route impassable. */
+    if (result == 3 && ordinary_water_footprint_touches_bridge(
+            dynmem, movement_class, (int)x, (int)z))
+    {
+        result = 1;
     }
 
     return result;
