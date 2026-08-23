@@ -34,6 +34,25 @@ whose walkable face is aligned to its placement origin. It requires
 `BuildableBridges=Yes`; either setting can be disabled independently by rebuilding
 the embedded INI.
 
+Maps can opt out of using bridge deck to cross `lavaworld` terrain by adding
+`bridgesoverrideimpassableterrain=0;` to their OTA `[GlobalHeader]`. The property
+defaults to `1`, so existing maps need no changes and ordinary water bridges are
+unaffected. A ground unit whose footprint center is on bridge deck is supported
+across its complete footprint, so even-sized units do not sample lava through a
+deck edge or the boundary between bridge sections. Bridge unit definitions
+containing at least one `=` cell are also
+excluded from the map's acid-water damage call: the damaging liquid remains below
+the deck and no longer destroys the bridge during construction. Conventional
+ground units supported by active bridge deck are excluded from that environmental
+damage as well; ships passing underneath remain exposed to the liquid.
+The bridge building itself does not obstruct movement on its marked `=` plots;
+unmarked plots and all unrelated unit occupancy remain blocking.
+
+When an amphibious ground unit can traverse both routes, ordinary water immediately
+beside active bridge deck receives TA's passable edge/slow path cost. This breaks
+the otherwise equal-cost tie in favor of the bridge without blocking the water or
+changing water elsewhere on the map. Naval movement remains unchanged.
+
 The generic defaults are `No`; this test build enables both settings in
 `res/patches.ini`. Every player in a multiplayer game must use the same settings and
 unit data. See `BUILDABLE_BRIDGES.md` for the reverse-engineering evidence, exact

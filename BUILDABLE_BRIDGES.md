@@ -41,7 +41,7 @@ The hook stores `0x00` for `.` and `0x01` for `=`. All other yardmap characters 
 their original handlers are unchanged. `TotalA.exe` is never modified on disk.
 
 With `BuildableBridges=No` (the default), neither address is signature-checked or
-modified.
+modified. The acid-water protection described below is also left untouched.
 
 ## Traversal patch
 
@@ -50,6 +50,7 @@ the following additional locations in memory:
 
 ```text
 0040D7B0  Add a bridge-aware fallback to the pathfinder's packed-grid query.
+0043657B  Read the bridge policy while parsing GlobalHeader.lavaworld.
 0043D912  Recheck a failed moving-unit plot transition against bridge deck.
 0047DFC0  Replace the movement-cell evaluator with a bridge-aware equivalent.
 00486109  Route unit creation height correction through the bridge wrapper.
@@ -63,43 +64,111 @@ blocking-feature, unit-clearance, water-depth, and slope tests. A cell carrying 
 flag `0x02` retains the feature and unit tests but is treated as a level supported
 surface rather than the underlying water or lava terrain.
 
+TA also records the stationary bridge building as the occupying unit on its
+footprint. The traversal evaluator ignores that building's normal unit-clearance
+failure only on a plot that is both marked as bridge deck and occupied by a unit
+definition containing `=`. This permits traffic to share the deck with the bridge
+that supplies it without making the bridge's unmarked footprint cells, ordinary
+buildings, or moving units nonblocking. The same narrow exception is applied to
+the later `CanAttachUnitToPiece` movement gate.
+
 The path-grid query preserves the original visibility and cached-grid result. Only
 when that result is blocked and the candidate footprint contains at least one
-bridge cell does it recalculate the candidate. Bridge cells are treated as deck;
-ordinary cells in the same footprint retain the original movement-class depth,
-slope, feature, and unit tests. Supporting mixed bridge/terrain footprints is
-necessary at both ends of a bridge, where a unit must straddle the shore and deck
-before it can stand wholly on either. The recalculation also reproduces the
-original movement grid's four perimeter checks and edge-cost result. Ordinary
-water or lava therefore remains unchanged. Movement classes requiring positive
-water depth retain the underlying terrain result, so ships continue beneath
+bridge cell does it recalculate the candidate. Bridge cells are treated as deck.
+When the unit-sized footprint's center plot is bridge deck, that deck supplies
+level terrain for the entire footprint while every covered plot still receives
+the blocking-feature and unit-clearance tests. This matters for even-sized units:
+a 2x2 footprint centered on deck can otherwise sample lava below an outer edge or
+the boundary between bridge sections. When the center is ordinary terrain, its
+depth and slope tests remain in force while any overlapping bridge plots are
+supported individually; this is necessary at both bridge ends, where a unit must
+straddle shore and deck before it can stand wholly on either. The center condition
+prevents an incidental peripheral overlap from creating passable terrain beside
+the bridge. The recalculation also reproduces the original movement grid's four
+perimeter checks and edge-cost result. Ordinary water or lava away from a deck
+center therefore remains unchanged. Movement classes requiring positive water
+depth retain the underlying terrain result, so ships continue beneath
 bridges instead of treating the deck as navigable terrain. A bridge unit's FBI
 `WaterLine` is not consulted by either path calculation—it affects model placement,
 not traversal.
+
+Flat bridge deck and traversable water can both receive packed-grid value `3`.
+TA's main A* search treats either as preferred, so an amphibious unit may choose an
+equal-length water route beside a bridge. The query wrapper detects a non-bridge,
+submerged ground-unit footprint whose one-cell perimeter touches active bridge
+deck and returns value `1` instead. That value remains passable but adds `0x1E`
+(one orthogonal step) to the A* route cost. The bridge therefore wins the local
+tie, while water farther from the bridge and all naval movement retain their
+native values.
 
 Route creation is not the last terrain test. When a ground unit's center crosses a
 plot boundary, the local movement controller calls `CanAttachUnitToPiece` and
 clamps the unit back into its previous plot if the new footprint fails the unit
 definition's depth or slope limits. The hook at `0043D912` leaves successful
 transitions unchanged. For a failed non-naval transition containing bridge deck,
-it repeats the same footprint test with bridge plots supported and all ordinary
-plots, blocking features, and other-unit occupancy preserved. This allows the
-unit to execute a route over the bridge rather than merely calculate one.
+it repeats the same footprint rule used by the path grid. A center supported by
+deck ignores the underlying terrain for the complete footprint, while all covered
+plots retain blocking-feature and other-unit occupancy tests. A center on ordinary
+terrain retains the ordinary depth and slope tests. This allows the unit to execute
+a route over the bridge rather than merely calculate one.
 
 The height wrapper first executes the original `UNITS_FixYPos`. When that call has
-recomputed the height of a conventional moving ground unit whose center is on a
-bridge cell, the wrapper uses the higher of its terrain-derived height or the map
-water surface as the top plane of a deck-aligned bridge model and levels pitch and
-roll. The bridge's thickness must extend downward from that origin rather than
-upward. The height-dirty bit is checked before the original call so periodic no-op
-calls cannot add a deck offset repeatedly. Aircraft, hovercraft, floaters, and
-stationary buildings are excluded. This makes the height behavior local to the
-unit-update paths instead of globally changing terrain queries used by features,
-projectiles, construction tests, and UI code.
+recomputed the height of a conventional moving ground unit whose occupied
+footprint contains a bridge cell, the wrapper uses the higher of its
+terrain-derived height or the map water surface as the top plane of a deck-aligned
+bridge model and levels pitch and roll. It reads the occupied plot origin and
+orientation-adjusted dimensions cached by TA's movement controller, matching the
+same odd/even and rotated footprint anchoring used by `CanAttachUnitToPiece`. This
+keeps a unit supported while its center straddles an outer edge or the boundary
+between adjacent bridge sections. The bridge's thickness must extend downward
+from that origin rather than upward. The height-dirty bit is checked before the
+original call so periodic no-op calls cannot add a deck offset repeatedly.
+Aircraft, hovercraft, floaters, and stationary buildings are excluded. This makes
+the height behavior local to the unit-update paths instead of globally changing
+terrain queries used by features, projectiles, construction tests, and UI code.
+
+### Map-level impassable-terrain policy
+
+The traversal patch adds one integer property to the map OTA's `[GlobalHeader]`:
+
+```text
+bridgesoverrideimpassableterrain=1;
+```
+
+The default is `1`, including when the property is absent, so existing maps retain
+working bridges. On a map with `lavaworld=1`, set the property to `0` to stop bridge
+deck from overriding the impassable terrain below sea level. The ordinary native
+terrain result then applies. The property does not disable bridge transit over
+normal water on maps where `lavaworld=0`.
+
+TA reads the new property through its existing `TdfFile::GetInt` while parsing the
+adjacent native `lavaworld` property. The hook records both values and returns the
+original `lavaworld` result unchanged. This keeps the policy map-scoped and avoids
+assigning a new field inside TA's fixed map-definition structure.
+
+### Acid-water protection
+
+When `BuildableBridges=Yes`, the installer also validates and redirects the map
+water-damage call at `0048AF32`. TA normally damages any eligible unit whose Y
+coordinate is at or below sea level when `waterdoesdamage` and `waterdamage` are
+enabled. That includes a bridge building whose placement origin is at the deck,
+even though its structure spans above the liquid.
+
+The wrapper suppresses only this environmental damage call, and only when the
+target unit definition's parsed yardmap contains at least one `0x01` bridge cell
+from `=`, or when a conventional non-naval ground unit's occupied footprint
+overlaps active bridge deck. Ships and submarines travelling in the liquid beneath
+a bridge are not protected. The map's impassable-terrain policy must permit the
+deck before a unit standing there receives protection. Weapon damage, reclaiming,
+self-destruct, and every other caller of `UNITS_MakeDamage` remain unchanged. The
+bridge's own protection applies while it is under construction as well as after
+completion.
 
 With `BridgeTraversal=No`, every movement, transition, path-grid, and height hook is
-left untouched. Every multiplayer participant must use identical values for both
-bridge settings and identical bridge unit data.
+left untouched, including the map-level traversal-property hook. Acid protection
+remains part of `BuildableBridges=Yes`. Every multiplayer participant must use
+identical values for both bridge settings, identical bridge unit data, and the same
+map OTA.
 
 ## Runtime validation
 
@@ -117,13 +186,25 @@ Suggested test sequence:
    sections need bridge cells on their touching edges; a `.` border leaves an
    underlying-terrain seam that land pathfinding cannot cross and over which units
    will return to terrain height.
-2. Place it across ordinary impassable terrain, then across lava and water.
+2. Place it across ordinary impassable terrain, then across lava and water. On a
+   `lavaworld=1` test map, confirm the absent/default or explicit value `1` permits
+   transit, while `bridgesoverrideimpassableterrain=0` restores the native blocked
+   result.
 3. Test conventional ground units from multiple movement classes in both directions,
-   including units larger than one plot cell.
+   including units larger than one plot cell. With an amphibious unit such as a
+   Commander, verify the route prefers completed deck over the adjacent water but
+   can still use that water when the bridge route is incomplete.
 4. Confirm builders and other structures cannot overlap the bridge cells.
 5. Destroy or reclaim the bridge and confirm paths are invalidated immediately.
 6. Test save/load, AI pathing, queued construction, and adjacent bridge sections.
-7. Confirm units remain visually on the deck rather than the terrain below it.
+7. Confirm units remain visually on the deck rather than the terrain below it,
+   including while walking along an outer edge and across the boundary between
+   adjacent sections. Include odd- and even-sized footprints if available.
 8. Test hovercraft, ships, submarines, aircraft, amphibious units, and transports for
    unintended height or routing changes around a bridge.
-9. In multiplayer, use identical DLL settings and unit data on every machine.
+9. On a map using `waterdoesdamage=1`, verify a bridge can be completed above acid
+   and a conventional ground unit standing on its deck remains unharmed, while an
+   ordinary unit entering the acid and a ship underneath the bridge still take the
+   configured damage.
+10. In multiplayer, use identical DLL settings, map OTA, and unit data on every
+    machine.
