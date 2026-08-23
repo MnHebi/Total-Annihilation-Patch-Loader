@@ -37,7 +37,11 @@ the embedded INI.
 Maps can opt out of using bridge deck to cross `lavaworld` terrain by adding
 `bridgesoverrideimpassableterrain=0;` to their OTA `[GlobalHeader]`. The property
 defaults to `1`, so existing maps need no changes and ordinary water bridges are
-unaffected. Bridge unit definitions containing at least one `=` cell are also
+unaffected. A ground unit whose footprint center is on bridge deck is supported
+across its complete footprint, so even-sized units do not sample lava through a
+deck edge. A single unmarked plot bounded by bridge cells on opposite sides is
+also treated as a section seam; exposed unmarked edge cells remain ordinary
+terrain. Bridge unit definitions containing at least one `=` cell are also
 excluded from the map's acid-water damage call: the damaging liquid remains below
 the deck and no longer destroys the bridge during construction. Conventional
 ground units supported by active bridge deck are excluded from that environmental

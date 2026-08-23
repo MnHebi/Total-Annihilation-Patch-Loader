@@ -251,6 +251,48 @@ static BOOL bridge_surface_supplies_terrain(void)
         g_map_bridges_override_impassable_terrain;
 }
 
+/*
+ * The test bridge's 5x5 yardmap uses a leading row and column of `.` followed
+ * by four rows of `.====`.  Two adjacent sections therefore leave one
+ * unmarked plot between their bridge flags.  Treat only a one-plot gap bounded
+ * by deck on opposite sides as continuous surface.  A dot along an exposed
+ * outer edge has deck on only one side and remains ordinary terrain.
+ */
+static BOOL plot_has_bridge_surface(
+    const BYTE *plot_map,
+    int map_width,
+    int map_height,
+    int x,
+    int z)
+{
+    const BYTE *plot;
+
+    if (plot_map == NULL ||
+        x < 0 || z < 0 || x >= map_width || z >= map_height)
+    {
+        return FALSE;
+    }
+
+    plot = plot_map + (z * map_width + x) * PLOT_RECORD_SIZE;
+    if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+        return TRUE;
+
+    if (x > 0 && x + 1 < map_width &&
+        (plot[-PLOT_RECORD_SIZE + PLOT_FLAGS_OFFSET] &
+            PLOT_BRIDGE_FLAG) != 0 &&
+        (plot[PLOT_RECORD_SIZE + PLOT_FLAGS_OFFSET] &
+            PLOT_BRIDGE_FLAG) != 0)
+    {
+        return TRUE;
+    }
+
+    return z > 0 && z + 1 < map_height &&
+        (plot[-map_width * PLOT_RECORD_SIZE + PLOT_FLAGS_OFFSET] &
+            PLOT_BRIDGE_FLAG) != 0 &&
+        (plot[map_width * PLOT_RECORD_SIZE + PLOT_FLAGS_OFFSET] &
+            PLOT_BRIDGE_FLAG) != 0;
+}
+
 static BOOL unit_definition_has_bridge_surface(const BYTE *definition)
 {
     const BYTE *yardmap;
@@ -294,7 +336,7 @@ static BOOL unit_footprint_contains_bridge_surface(
     const BYTE *dynmem,
     const BYTE *unit)
 {
-    BYTE *plot;
+    BYTE *plot_map;
     int map_width;
     int map_height;
     int plot_x;
@@ -320,21 +362,25 @@ static BOOL unit_footprint_contains_bridge_surface(
         return FALSE;
     }
 
-    plot = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
-    if (plot == NULL)
+    plot_map = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
+    if (plot_map == NULL)
         return FALSE;
-    plot += (plot_z * map_width + plot_x) * PLOT_RECORD_SIZE;
 
     for (row = 0; row < footprint_height; ++row)
     {
         int column;
         for (column = 0; column < footprint_width; ++column)
         {
-            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+            if (plot_has_bridge_surface(
+                    plot_map,
+                    map_width,
+                    map_height,
+                    plot_x + column,
+                    plot_z + row))
+            {
                 return TRUE;
-            plot += PLOT_RECORD_SIZE;
+            }
         }
-        plot += (map_width - footprint_width) * PLOT_RECORD_SIZE;
     }
 
     return FALSE;
@@ -427,7 +473,7 @@ static BOOL bridge_footprint_contains_surface(
     int x,
     int z)
 {
-    BYTE *plot;
+    BYTE *plot_map;
     int map_width;
     int map_height;
     int footprint_width;
@@ -450,21 +496,25 @@ static BOOL bridge_footprint_contains_surface(
         return FALSE;
     }
 
-    plot = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
-    if (plot == NULL)
+    plot_map = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
+    if (plot_map == NULL)
         return FALSE;
-    plot += (z * map_width + x) * PLOT_RECORD_SIZE;
 
     for (row = 0; row < footprint_height; ++row)
     {
         int column;
         for (column = 0; column < footprint_width; ++column)
         {
-            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+            if (plot_has_bridge_surface(
+                    plot_map,
+                    map_width,
+                    map_height,
+                    x + column,
+                    z + row))
+            {
                 return TRUE;
-            plot += PLOT_RECORD_SIZE;
+            }
         }
-        plot += (map_width - footprint_width) * PLOT_RECORD_SIZE;
     }
 
     return FALSE;
@@ -524,14 +574,18 @@ static BOOL ordinary_water_footprint_touches_bridge(
     for (row = 0; row < footprint_height; ++row)
     {
         int column;
-        const BYTE *plot = plot_map +
-            ((z + row) * map_width + x) * PLOT_RECORD_SIZE;
 
         for (column = 0; column < footprint_width; ++column)
         {
-            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+            if (plot_has_bridge_surface(
+                    plot_map,
+                    map_width,
+                    map_height,
+                    x + column,
+                    z + row))
+            {
                 return FALSE;
-            plot += PLOT_RECORD_SIZE;
+            }
         }
     }
 
@@ -540,8 +594,6 @@ static BOOL ordinary_water_footprint_touches_bridge(
         int column;
         for (column = x - 1; column <= x + footprint_width; ++column)
         {
-            const BYTE *plot;
-
             if (column < 0 || row < 0 ||
                 column >= map_width || row >= map_height ||
                 (column >= x && column < x + footprint_width &&
@@ -550,10 +602,15 @@ static BOOL ordinary_water_footprint_touches_bridge(
                 continue;
             }
 
-            plot = plot_map +
-                (row * map_width + column) * PLOT_RECORD_SIZE;
-            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+            if (plot_has_bridge_surface(
+                    plot_map,
+                    map_width,
+                    map_height,
+                    column,
+                    row))
+            {
                 return TRUE;
+            }
         }
     }
 
@@ -573,6 +630,7 @@ static unsigned int __stdcall bridge_movement_cell_evaluator(
     int map_height;
     unsigned int result = 3;
     int row;
+    BOOL bridge_supports_footprint = FALSE;
 
     if (dynmem == NULL || movement_class == NULL)
         return 0;
@@ -588,6 +646,28 @@ static unsigned int __stdcall bridge_movement_cell_evaluator(
     plot = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
     if (plot == NULL)
         return 0;
+
+    /*
+     * A unit is positioned by its footprint center.  Once that center is on
+     * bridge deck, the deck supports the whole unit even when an even-sized
+     * footprint straddles a section boundary or overhangs a deck edge.  The
+     * loop below still checks every covered plot for features and units.
+     * Requiring each peripheral plot to have a bridge flag makes a 2x2 unit
+     * sample the lava below the deck and disconnects an otherwise continuous
+     * bridge.
+     */
+    if (bridge_surface_supplies_terrain() &&
+        movement_uses_bridge_surface(movement_class) &&
+        plot_has_bridge_surface(
+            plot,
+            map_width,
+            map_height,
+            x + footprint_width / 2,
+            z + footprint_height / 2))
+    {
+        bridge_supports_footprint = TRUE;
+    }
+
     plot += (z * map_width + x) * PLOT_RECORD_SIZE;
 
     for (row = 0; row < footprint_height; ++row)
@@ -607,9 +687,10 @@ static unsigned int __stdcall bridge_movement_cell_evaluator(
             }
 
             /* A bridge supplies a level, solid movement surface here. */
-            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0 &&
-                bridge_surface_supplies_terrain() &&
-                movement_uses_bridge_surface(movement_class))
+            if (bridge_supports_footprint ||
+                ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0 &&
+                    bridge_surface_supplies_terrain() &&
+                    movement_uses_bridge_surface(movement_class)))
             {
                 plot += PLOT_RECORD_SIZE;
                 continue;
@@ -722,8 +803,8 @@ static unsigned int bridge_movement_grid_cell_result(
  * unit crosses a plot boundary, MovingUnit? calls CanAttachUnitToPiece and
  * clamps the unit back into its previous plot if the new footprint fails the
  * unit definition's depth/slope tests.  Re-evaluate only that failed moving-
- * unit call, treating bridge plots as supported deck while retaining every
- * ordinary plot, feature, and unit-occupancy test.
+ * unit call.  A center plot on bridge deck supplies terrain for the complete
+ * footprint, while every covered plot retains feature and unit-occupancy tests.
  */
 static unsigned int __stdcall bridge_can_attach_moving_unit(
     BYTE *unit_definition,
@@ -741,6 +822,7 @@ static unsigned int __stdcall bridge_can_attach_moving_unit(
     int footprint_height;
     int row;
     BOOL saw_bridge = FALSE;
+    BOOL bridge_supports_footprint = FALSE;
     unsigned int original_result;
 
     original_result = original_can_attach_unit(
@@ -780,6 +862,18 @@ static unsigned int __stdcall bridge_can_attach_moving_unit(
     plot = read_pointer(dynmem + DYN_PLOT_MAP_OFFSET);
     if (plot == NULL)
         return 0;
+
+    if (plot_has_bridge_surface(
+            plot,
+            map_width,
+            map_height,
+            x + footprint_width / 2,
+            z + footprint_height / 2))
+    {
+        bridge_supports_footprint = TRUE;
+        saw_bridge = TRUE;
+    }
+
     plot += (z * map_width + x) * PLOT_RECORD_SIZE;
 
     for (row = 0; row < footprint_height; ++row)
@@ -796,7 +890,8 @@ static unsigned int __stdcall bridge_can_attach_moving_unit(
                 return 0;
             }
 
-            if ((plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
+            if (bridge_supports_footprint ||
+                (plot[PLOT_FLAGS_OFFSET] & PLOT_BRIDGE_FLAG) != 0)
             {
                 saw_bridge = TRUE;
             }

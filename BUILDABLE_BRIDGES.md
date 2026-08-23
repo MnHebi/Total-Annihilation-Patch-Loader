@@ -64,16 +64,30 @@ blocking-feature, unit-clearance, water-depth, and slope tests. A cell carrying 
 flag `0x02` retains the feature and unit tests but is treated as a level supported
 surface rather than the underlying water or lava terrain.
 
+The supplied 5x5 test bridge uses `.....` followed by four `.====` yardmap rows.
+Adjacent copies consequently leave a one-plot unmarked row or column between
+their flagged deck cells. The traversal patch recognizes an unmarked plot as a
+section seam only when bridge flags bound it on opposite sides. This closes that
+specific joint while leaving exposed `.` border cells as ordinary terrain.
+
 The path-grid query preserves the original visibility and cached-grid result. Only
 when that result is blocked and the candidate footprint contains at least one
-bridge cell does it recalculate the candidate. Bridge cells are treated as deck;
-ordinary cells in the same footprint retain the original movement-class depth,
-slope, feature, and unit tests. Supporting mixed bridge/terrain footprints is
-necessary at both ends of a bridge, where a unit must straddle the shore and deck
-before it can stand wholly on either. The recalculation also reproduces the
-original movement grid's four perimeter checks and edge-cost result. Ordinary
-water or lava therefore remains unchanged. Movement classes requiring positive
-water depth retain the underlying terrain result, so ships continue beneath
+bridge cell does it recalculate the candidate. Bridge cells are treated as deck.
+When the unit-sized footprint's center plot is bridge deck, that deck supplies
+level terrain for the entire footprint while every covered plot still receives
+the blocking-feature and unit-clearance tests. This matters for even-sized units:
+a 2x2 footprint centered on deck can otherwise sample lava below an outer edge or
+the boundary between bridge sections. When the center is ordinary terrain, its
+depth and slope tests remain in force while any overlapping bridge plots are
+supported individually; this is necessary at both bridge ends, where a unit must
+straddle shore and deck before it can stand wholly on either. The center condition
+prevents an incidental peripheral overlap from creating passable terrain beside
+the bridge. A one-plot section seam bounded by bridge flags on opposite sides
+counts as deck for this center test. The recalculation also reproduces the
+original movement grid's four
+perimeter checks and edge-cost result. Ordinary water or lava away from a deck
+center therefore remains unchanged. Movement classes requiring positive water
+depth retain the underlying terrain result, so ships continue beneath
 bridges instead of treating the deck as navigable terrain. A bridge unit's FBI
 `WaterLine` is not consulted by either path calculation—it affects model placement,
 not traversal.
@@ -92,9 +106,11 @@ plot boundary, the local movement controller calls `CanAttachUnitToPiece` and
 clamps the unit back into its previous plot if the new footprint fails the unit
 definition's depth or slope limits. The hook at `0043D912` leaves successful
 transitions unchanged. For a failed non-naval transition containing bridge deck,
-it repeats the same footprint test with bridge plots supported and all ordinary
-plots, blocking features, and other-unit occupancy preserved. This allows the
-unit to execute a route over the bridge rather than merely calculate one.
+it repeats the same footprint rule used by the path grid. A center supported by
+deck ignores the underlying terrain for the complete footprint, while all covered
+plots retain blocking-feature and other-unit occupancy tests. A center on ordinary
+terrain retains the ordinary depth and slope tests. This allows the unit to execute
+a route over the bridge rather than merely calculate one.
 
 The height wrapper first executes the original `UNITS_FixYPos`. When that call has
 recomputed the height of a conventional moving ground unit whose occupied
@@ -167,9 +183,9 @@ Suggested test sequence:
 1. Create or select a bridge unit whose `FootprintX` by `FootprintZ` yardmap uses
    `=` for every intended deck cell. Ensure the yardmap has exactly one recognized
    character per footprint cell (whitespace is allowed and ignored). Adjacent
-   sections need bridge cells on their touching edges; a `.` border leaves an
-   underlying-terrain seam that land pathfinding cannot cross and over which units
-   will return to terrain height.
+   sections should normally have bridge cells on their touching edges. The patch
+   can join a one-cell `.` seam when bridge cells bound it on opposite sides, but
+   wider gaps remain underlying terrain.
 2. Place it across ordinary impassable terrain, then across lava and water. On a
    `lavaworld=1` test map, confirm the absent/default or explicit value `1` permits
    transit, while `bridgesoverrideimpassableterrain=0` restores the native blocked
